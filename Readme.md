@@ -5,6 +5,33 @@ This project analyzes the Professional Qualifications Repertoire of the Calabria
 
 Each profile (qualification) is described in terms of knowledge (know-what) and skills/competencies (know-how) necessary to perform specific work activities. Although managed locally, the repertoire feeds into the National Framework of Regional Qualifications (QNQR), ensuring that qualifications obtained in one region are valid throughout Italy and transparent for recognition in Europe (through the EQF - European Qualifications Framework). All regional profiles and their national correspondences are also available through the Atlas of Work and Qualifications managed by INAPP (https://www.inapp.gov.it/atlantelavoro/).
 
+## Technologies & Tools
+
+### Data Processing
+- **Polars** - High-performance DataFrame library for data manipulation and transformation
+- **Python 3.12** - Core programming language
+- **PostgreSQL** - Relational database for storing qualifications data
+
+### Data Visualization
+- **NetworkX** - Graph creation and analysis
+- **PyVis** - Interactive network visualizations
+- **Matplotlib** - Static graph visualizations
+- **Vis.js** - JavaScript network visualization library
+
+### Graph Database
+- **Neo4j AuraDB** - Cloud-based graph database for relationship analysis
+- **Cypher** - Query language for Neo4j
+
+### Data Sources
+- **Lightcast (formerly Emsi Burning Glass)** - Job postings and labor market data
+- **INAPP Atlas** - National professional classifications (ADA, CP2021)
+- **Regional Training Catalogue** - Calabria professional qualifications
+
+### Environment
+- **Docker** - Containerized development environment
+- **UV** - Fast Python package installer
+- **Jupyter** - Interactive notebook environment
+
 ## Project Structure
 
 ```
@@ -40,10 +67,10 @@ Each profile (qualification) is described in terms of knowledge (know-what) and 
 ├── meeting_notes/             # Meeting notes and documentation
 │
 ├── notebooks/                 # Jupyter notebooks for analysis
-│   ├── graph_creation_ada.ipynb            # ADA graph creation
-│   ├── graph_creation.ipynb                # General graph creation
-│   ├── lightast_prep.ipynb                 # Lightcast data preparation
-│   ├── rtc_prep.ipynb                      # RTC data preparation
+│   ├── rtc_prep.ipynb                      # RTC data preparation and cleaning
+│   ├── lightast_prep.ipynb                 # Lightcast job postings data preparation
+│   ├── graph_creation_ada.ipynb            # ADA-Attivita-SEP graph creation & Neo4j export
+│   ├── graph_creation_from_db.ipynb        # Database-driven graph creation
 │   └── lib/                   # JavaScript libraries for visualization
 │       ├── bindings/
 │       │   └── utils.js
@@ -55,10 +82,10 @@ Each profile (qualification) is described in terms of knowledge (know-what) and 
 │           └── vis-network.min.js
 │
 └── outputs/                   # Generated outputs
-    ├── ada_attivita_cp2021_graph.html      # ADA-Activities-CP2021 graph
-    ├── ada_attivita_graph.html             # ADA-Activities graph
-    ├── codice_ada_codice_cp2021_graph.html # ADA-CP2021 codes graph
-    └── profili_comp_graph.html             # Profiles-Competencies graph
+    ├── ada_attivita_sep_graph.html         # Interactive ADA-Activities-SEP graph
+    ├── neo4j_import.cypher                 # Neo4j Cypher import commands
+    ├── ojp_and_skills_calabria_nested.parquet # Processed job postings with skills
+    └── ada_and_attivita_nested.parquet     # Processed ADA with nested activities
 ```
 
 ## Data Structure
@@ -95,6 +122,83 @@ The extraction consists of 5 interconnected datasets linked through identifying 
 - `id_competenza` - Competency ID (foreign key)
 - `descrizione` - Description
 
+## Analysis Notebooks
+
+The project includes four Jupyter notebooks for data processing, analysis, and visualization:
+
+### 1. rtc_prep.ipynb - Regional Training Catalogue Data Preparation
+**Purpose:** Prepares and cleans the Regional Training Catalogue (RTC) data for analysis.
+
+**Key Operations:**
+- Loads ADA (Area of Activity), Attivita (Activities/Skills), and CP2021 (Professional Classifications) datasets
+- Converts data types (e.g., SEP codes to strings)
+- Identifies and analyzes duplicates in the activities dataset
+- Merges ADA data with CP2021 professional classifications
+- Creates nested data structures grouping activities by ADA codes
+- Exports processed data to: `../data/rtc/ada_and_attivita_nested.parquet`
+
+**Output:** Clean, nested Polars dataframes ready for graph creation and analysis.
+
+### 2. lightast_prep.ipynb - Lightcast Job Postings Data Preparation
+**Purpose:** Processes Lightcast job posting data for the Calabria region and maps it to professional taxonomies.
+
+**Key Operations:**
+- Loads Italian job postings from 2025 dataset (ITA_2025_postings.parquet)
+- Filters postings for Calabria region (LAA_ADMIN_AREA_1 == "ITF6")
+- Removes undefined (99) and volunteer (29) career areas
+- Automatically decodes taxonomy codes using Lightcast dictionaries:
+  - Location (LAA), Occupation (LOT), Industry (NAICS), Professional (ISCO-08)
+  - Skill categories and subcategories
+- Merges job postings with skills data
+- Creates nested structure with skills embedded as lists of structs for each posting
+- Adds row index for tracking
+- Exports processed data to: `../data/lightcast/ojp_and_skills_calabria_nested.parquet`
+
+**Output:** ~26,000 job postings with nested skills data, ready for labor market analysis.
+
+### 3. graph_creation_ada.ipynb - ADA Network Graph Creation & Neo4j Export
+**Purpose:** Creates interactive network visualizations of ADA-Activities-SEP relationships and exports to Neo4j.
+
+**Key Operations:**
+- Loads nested ADA and activities data from parquet files
+- Builds NetworkX graph with three node types:
+  - **ADA nodes** (Blue, Professional Activities): ~540 nodes
+  - **Attivita nodes** (Red/Purple, Skills): ~3,800 nodes
+  - **SEP nodes** (Green, Economic Sectors): ~25 nodes
+- Creates edges representing relationships between:
+  - ADA → Attivita (skills required for each activity area)
+  - ADA → SEP (sector classification)
+- Generates multiple visualizations:
+  - **Matplotlib**: Static PNG with spring layout
+  - **PyVis**: Interactive HTML with pre-computed layout for fast loading
+- Exports to Neo4j AuraDB:
+  - Generates Cypher commands for graph database import
+  - Creates constraints and indexes
+  - Establishes relationships: `HAS_ATTIVITA` and `BELONGS_TO_SEP`
+  - Provides Python code for automated import using neo4j driver
+
+**Outputs:**
+- `/app/outputs/ada_attivita_sep_graph.html` - Interactive graph visualization
+- `/app/outputs/neo4j_import.cypher` - Neo4j import script
+
+**Features:**
+- Physics-disabled layout for instant loading
+- Color-coded node types
+- Hover tooltips with detailed information
+- SEP nodes have persistent labels for quick identification
+
+### 4. graph_creation_from_db.ipynb - Database-Driven Graph Creation
+**Purpose:** Creates network graphs directly from PostgreSQL database queries.
+
+**Key Operations:**
+- Connects to PostgreSQL database containing regional qualifications data
+- Queries profiles, competencies, and their relationships
+- Builds bipartite network graphs
+- Generates interactive PyVis visualizations
+- Exports to: `/app/outputs/profili_comp_graph.html`
+
+**Output:** Interactive HTML graphs showing relationships between professional profiles and competencies.
+
 ## Data Quality Notes
 
 ### Data Consistency
@@ -113,3 +217,106 @@ Regional Qualifications (in the "profiles" dataset) can be associated with "ADA 
 
 ### Training Courses
 The dataset does not contain information about authorized or activated training courses in the Calabria Region.
+
+## Getting Started
+
+### Prerequisites
+- Docker Desktop or Docker Engine
+- VS Code with Dev Containers extension (recommended)
+
+### Setup
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd OECD_calabria
+   ```
+
+2. **Start the development container**
+   ```bash
+   # Using VS Code
+   # Open folder in VS Code and select "Reopen in Container"
+   
+   # Or using Docker Compose
+   docker-compose up -d
+   ```
+
+3. **Install Python dependencies**
+   ```bash
+   source /app/.venv/bin/activate
+   uv sync
+   ```
+
+4. **Install additional packages for notebooks**
+   ```bash
+   uv add polars networkx pyvis matplotlib neo4j python-dotenv
+   ```
+
+### Running the Analysis
+
+The notebooks should be run in the following order:
+
+1. **rtc_prep.ipynb** - Prepare Regional Training Catalogue data
+   - Loads and cleans ADA, Activities, and CP2021 data
+   - Outputs: `ada_and_attivita_nested.parquet`
+
+2. **lightast_prep.ipynb** - Prepare Lightcast job postings data
+   - Filters and decodes Calabria job postings
+   - Maps to professional taxonomies
+   - Outputs: `ojp_and_skills_calabria_nested.parquet`
+
+3. **graph_creation_ada.ipynb** - Create network visualizations
+   - Generates interactive graphs
+   - Exports Neo4j import scripts
+   - Outputs: HTML visualizations and Cypher files
+
+4. **graph_creation_from_db.ipynb** - Create database-driven graphs
+   - Requires PostgreSQL database setup
+   - Generates profile-competency graphs
+
+### Neo4j Integration
+
+To import the graph into Neo4j AuraDB:
+
+1. **Create a free AuraDB instance** at https://console.neo4j.io/
+
+2. **Configure environment variables**
+   Create `/app/.env` file:
+   ```bash
+   NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+   NEO4J_USERNAME=neo4j
+   NEO4J_PASSWORD=your-password
+   ```
+
+3. **Run the import**
+   Execute the Neo4j import cell in `graph_creation_ada.ipynb`
+   or use the generated Cypher file via Neo4j Browser
+
+### Viewing Outputs
+
+- **Interactive graphs**: Open HTML files in `/app/outputs/` with any web browser
+- **Data files**: Parquet files can be opened with Polars, Pandas, or DuckDB
+- **Cypher scripts**: Import into Neo4j Browser or use with Python neo4j driver
+
+## Project Outputs
+
+### Processed Data Files
+- `ada_and_attivita_nested.parquet` - Nested ADA data with activities (~540 ADAs, ~3,800 activities)
+- `ojp_and_skills_calabria_nested.parquet` - Job postings with skills (~26,000 postings)
+
+### Visualizations
+- `ada_attivita_sep_graph.html` - Interactive network graph (ADA-Activities-SEP)
+- `profili_comp_graph.html` - Profile-competency relationships
+- `neo4j_import.cypher` - Graph database import script
+
+### Statistics
+- **Calabria Job Postings**: ~26,137 postings (after filtering)
+- **Job Postings with Skills**: ~22,527 postings
+- **Professional Activity Areas (ADA)**: ~540 unique areas
+- **Activities/Skills**: ~3,800 unique activities
+- **Economic Sectors (SEP)**: ~25 sectors
+- **Network Edges**: ~4,000+ relationships
+
+## Contributing
+
+This project is part of the OECD initiative to analyze regional labor markets and professional qualifications in Calabria, Italy.
